@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cyber wordle – endelig stabil</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#FAF9F4; --surface:#FFFFFF; --text:#434342; --muted:#6A6969; --border:#D6D6D6;
+      --accent:#C5252F; --correct:#6AAA64; --present:#C9B458; --absent:#787C7E;
+      --key:#D6D6D6; --key-text:#434342;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:'Inter',system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;display:flex;justify-content:center;padding:16px}
+    .app{width:min(640px,96vw)}
+    header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
+    h1{margin:0;font-size:22px;font-weight:700}
+    .accent{height:3px;width:56px;background:var(--accent);border-radius:2px}
+    .meta{font-size:12px;color:var(--muted);margin:6px 0}
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;box-shadow:0 2px 10px rgba(0,0,0,.05)}
+
+    .board{display:grid;grid-template-rows:repeat(6,1fr);gap:6px;margin:10px 0 16px}
+    .row{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+    .tile{width:100%;aspect-ratio:1;border:2px solid var(--border);border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:24px;background:var(--surface)}
+    .tile.revealed{color:#fff;border-color:transparent}
+    .tile.absent{background:var(--absent)}
+    .tile.present{background:var(--present)}
+    .tile.correct{background:var(--correct)}
+
+    .kb{display:grid;gap:8px}
+    .kb-row{display:flex;gap:6px;justify-content:center}
+    .key{background:var(--key);color:var(--key-text);border:1px solid var(--border);border-radius:6px;padding:10px 8px;font-weight:700;min-width:32px;cursor:pointer}
+    .key.wide{min-width:56px}
+    .key.absent{background:var(--absent);color:#fff;border-color:transparent}
+    .key.present{background:var(--present);color:#fff;border-color:transparent}
+    .key.correct{background:var(--correct);color:#fff;border-color:transparent}
+
+    .calendar-tab{position:relative}
+    .calendar-btn{background:var(--surface);border:1px solid var(--border);padding:6px 10px;border-radius:6px;cursor:pointer}
+    .calendar-panel{position:absolute;top:32px;right:0;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px;display:none;box-shadow:0 2px 10px rgba(0,0,0,.08);z-index:20}
+    .calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;font-size:12px;text-align:center}
+    .calendar-day{padding:6px;border-radius:4px}
+    .calendar-day:not(.inactive){cursor:pointer}
+    .calendar-day:hover{background:#eee}
+    .inactive{opacity:.3;cursor:default}
+    .active{background:var(--accent);color:#fff}
+
+    .msg{position:fixed;top:18px;left:50%;transform:translateX(-50%);background:#2a2a2b;color:#fff;padding:8px 12px;border-radius:6px;opacity:0;transition:opacity .2s}
+    .msg.show{opacity:1}
+
+    dialog{border:none;border-radius:12px;background:var(--surface);color:var(--text);max-width:min(680px,92vw);padding:0}
+    dialog::backdrop{background:rgba(0,0,0,.45)}
+    .modal header{padding:16px 18px;border-bottom:1px solid var(--border)}
+    .modal h2{margin:0 0 6px 0;font-size:18px}
+    .modal section{padding:16px 18px}
+    .modal footer{display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--border);padding:12px 16px}
+    button{cursor:pointer;border-radius:8px;border:1px solid var(--border);background:#fff;color:var(--text);padding:10px 12px;font-weight:600}
+    .primary{background:var(--accent);border-color:var(--accent);color:#fff}
+    .learn h3{margin:12px 0 6px 0;font-size:14px}
+
+    /* Hint popup */
+    #hintPopup{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#fff;border:1px solid var(--border);border-radius:8px;padding:12px 16px;box-shadow:0 2px 10px rgba(0,0,0,.12);display:none;z-index:30}
+    #hintPopup button{padding:6px 10px;border-radius:6px;border:1px solid var(--border);font-weight:600;cursor:pointer}
+    #hintYes{background:var(--accent);border-color:var(--accent);color:#fff}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div>
+        <h1>Cyber wordle</h1>
+        <div class="accent" aria-hidden="true"></div>
+      </div>
+      <div class="calendar-tab">
+        <button id="calBtn" class="calendar-btn">Vælg dag ▾</button>
+        <div id="calendarPanel" class="calendar-panel"></div>
+      </div>
+    </header>
+    <div id="meta" class="meta"></div>
+    <div class="card">
+      <div id="board" class="board" aria-label="Spilbræt"></div>
+      <div id="keyboard" class="kb" aria-label="Skærmtastatur"></div>
+      <p class="meta">Enter = gæt • Backspace = slet</p>
+    </div>
+  </div>
+
+  <div id="toast" class="msg" role="status" aria-live="polite"></div>
+
+  <!-- Hint popup (ikke-blokerende) -->
+  <div id="hintPopup">
+    <div id="hintText" style="margin-bottom:8px">Vil du have et hint?</div>
+    <div style="display:flex;gap:8px;justify-content:center">
+      <button id="hintYes">Ja</button>
+      <button id="hintNo">Nej</button>
+    </div>
+  </div>
+
+  <!-- Resultat-modal (tillykke / øv + læring) -->
+  <dialog id="result">
+    <div class="modal">
+      <header>
+        <h2 id="resultTitle">Godt gået!</h2>
+        <div id="resultSubtitle" class="meta"></div>
+      </header>
+      <section>
+        <div class="learn" id="learn"></div>
+      </section>
+      <footer>
+        <button id="copyBtn">kopiér læringstekst</button>
+        <button id="againBtn" class="primary">spil igen</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <script>
+  (function(){
+    // === KONSTANTER ===
+    const OCT_YEAR=2026,OCT_MONTH=9; // oktober
+
+    function octoberWorkdays(){
+      const arr=[]; const d=new Date(Date.UTC(OCT_YEAR,OCT_MONTH,1));
+      while(d.getUTCMonth()===OCT_MONTH){ const wd=d.getUTCDay(); if(wd>=1&&wd<=5) arr.push(new Date(d)); d.setUTCDate(d.getUTCDate()+1); }
+      return arr; // 22 dage
+    }
+    const workdays=octoberWorkdays();
+
+    const words=['VIRUS','PATCH','TOKEN','PROXY','PHISH','ADMIN','HTTPS','AUDIT','CACHE','LOGIN','ALERT','SCADA','EMAIL','SPOOF','OAUTH','TRUST','RISKS','SALTS','RESET','RULES','TRACE','CLOUD'];
+
+    const learn={
+      VIRUS:{what:'Malware, der kopierer sig selv og spreder sig.',why:'Kan føre til datatab og nedetid.',tip:'Opdater og kør kun betroet software.',fact:'De første pc‑virus dukkede op i 1980’erne.',hint:'Noget der kan sprede sig mellem systemer.'},
+      PATCH:{what:'Opdatering der lukker sårbarheder.',why:'Uopdaterede systemer er hyppige angrebsmål.',tip:'Automatisér patching og prioriter kritiske CVE’er.',fact:'Mange brud skyldes kendte, upatchede fejl.',hint:'En opdatering der lukker et hul.'},
+      TOKEN:{what:'Midlertidig nøgle (fx session/JWT).',why:'Læk kan give kapring af sessioner.',tip:'Korte TTLs, secure/HttpOnly cookies.',fact:'SSO benytter tokens fremfor kodeord.',hint:'Bruges til at bevise identitet.'},
+      PROXY:{what:'Mellemled for trafik.',why:'Kan filtrere og logge.',tip:'Overvej TLS‑inspektion hvor lovligt.',fact:'Secure web gateways er udbredte.',hint:'Et mellemled i trafikken.'},
+      PHISH:{what:'Forsøg på at narre oplysninger/adgang.',why:'Hyppigste start på brud.',tip:'Vær skeptisk over pres og fejl.',fact:'Spear‑phishing er målrettet.',hint:'Et forsøg på at narre dig.'},
+      ADMIN:{what:'Udvidede rettigheder.',why:'Misbrug giver fuld kontrol.',tip:'PoLP og tidsbegrænset adgang.',fact:'Lateral movement er almindelig.',hint:'En bruger med højere rettigheder.'},
+      HTTPS:{what:'Krypteret HTTP over TLS.',why:'Beskytter data i transit.',tip:'HSTS og moderne TLS.',fact:'Hængelås = sikker transport, ikke sikker side.',hint:'Sikker webforbindelse.'},
+      AUDIT:{what:'Revision/logning.',why:'Muliggør detektion og efterlevelse.',tip:'Centralisér i SIEM.',fact:'Mangelfuld logning skjuler hændelser.',hint:'Logning og sporbarhed.'},
+      CACHE:{what:'Midlertidig lagring.',why:'Kan lække data hvis forkert brugt.',tip:'Brug korrekte cache‑headers.',fact:'Shared caches kan afsløre indhold.',hint:'Midlertidig lagring.'},
+      LOGIN:{what:'Adgangsproces.',why:'Svage kodeord udnyttes.',tip:'MFA og unikke kodeord.',fact:'Managers hjælper med unikke kodeord.',hint:'Adgang til system.'},
+      ALERT:{what:'Automatisk advarsel.',why:'Tidlig reaktion minimerer skade.',tip:'Definér playbooks.',fact:'MTTD/MTTR er centrale KPI’er.',hint:'En advarsel.'},
+      SCADA:{what:'Industrielt kontrolsystem.',why:'Påvirker drift/forsyning.',tip:'Segmentér OT/IT.',fact:'Lang livscyklus og få patchvinduer.',hint:'Industrielt kontrolsystem.'},
+      EMAIL:{what:'Kommunikationskanal.',why:'Hyppig angrebsvektor.',tip:'SPF/DKIM/DMARC.',fact:'BEC skaber store tab.',hint:'Indbakken.'},
+      SPOOF:{what:'Forfalskning af identitet.',why:'Skaber falsk tillid.',tip:'Autentificering og filtre.',fact:'DNS‑spoofing kan omdirigere.',hint:'At udgive sig for noget andet.'},
+      OAUTH:{what:'Delegeret adgang via tokens.',why:'Reducerer kodeordsdeling.',tip:'Minimér scopes.',fact:'OIDC bygger på OAuth.',hint:'Adgang uden kodeordsdeling.'},
+      TRUST:{what:'Tillidsmodel.',why:'Zero Trust: verificér altid.',tip:'Stærk identitet og segmentering.',fact:'Model – ikke produkt.',hint:'Tillid, sikkerhedsmodel.'},
+      RISKS:{what:'Konsekvenser af trusler.',why:'Styr prioritering.',tip:'Risikomatrix.',fact:'Residuel risiko kræver beslutning.',hint:'Mulige konsekvenser.'},
+      SALTS:{what:'Tilfældig værdi før hashing.',why:'Hindrer ens hashes.',tip:'Unikke salts + moderne hash.',fact:'“Pepper” er ekstra hemmelig værdi.',hint:'Tilføjes før hashing.'},
+      RESET:{what:'Gendannelse/tilbagestilling.',why:'Reducerer nedetid.',tip:'Stærk verifikation ved reset.',fact:'Backup er kun god med testet restore.',hint:'Gendannelse.'},
+      RULES:{what:'Detektions-/firewallregler.',why:'Skiller signal fra støj.',tip:'Versionér og trim undtagelser.',fact:'Tuning er kontinuerlig.',hint:'Regler for detektion.'},
+      TRACE:{what:'Sporing/fejlsøgning.',why:'Vigtigt ved hændelser.',tip:'NTP‑synk.',fact:'PCAP/Sysmon er guld.',hint:'At følge handlinger.'},
+      CLOUD:{what:'It over internettet.',why:'Delt ansvar.',tip:'Shared responsibility.',fact:'IAM‑fejl er hyppige.',hint:'Leveret over internettet.'}
+    };
+
+    // === STATE ===
+    let state={};
+
+    function startFor(date){
+      const idx=workdays.findIndex(d=>d.getTime()===date.getTime());
+      const word=words[idx];
+      state={date,word,row:0,col:0,grid:Array.from({length:6},()=>Array(5).fill('')),statuses:Array.from({length:6},()=>Array(5).fill('')),finished:false,hintShown:false};
+      buildBoard(); buildKeyboard(); updateBoard(); updateMeta(); highlightCalendar(date);
+    }
+
+    // === UI refs ===
+    const boardEl=document.getElementById('board');
+    const kbEl=document.getElementById('keyboard');
+    const metaEl=document.getElementById('meta');
+    const toastEl=document.getElementById('toast');
+    const dlg=document.getElementById('result');
+    const againBtn=document.getElementById('againBtn');
+    const copyBtn=document.getElementById('copyBtn');
+
+    // === Build board/keyboard ===
+    function buildBoard(){
+      boardEl.innerHTML='';
+      for(let r=0;r<6;r++){
+        const row=document.createElement('div'); row.className='row';
+        for(let c=0;c<5;c++){
+          const t=document.createElement('div'); t.className='tile'; t.id=`t-${r}-${c}`;
+          row.appendChild(t);
+        }
+        boardEl.appendChild(row);
+      }
+    }
+
+    function buildKeyboard(){
+      const rows=[['Q','W','E','R','T','Y','U','I','O','P'],['A','S','D','F','G','H','J','K','L'],['ENTER','Z','X','C','V','B','N','M','\u232b']];
+      kbEl.innerHTML='';
+      rows.forEach(r=>{
+        const row=document.createElement('div'); row.className='kb-row';
+        r.forEach(k=>{ const b=document.createElement('button'); b.className='key'; b.textContent=k; if(k==='ENTER'||k==='\u232b') b.classList.add('wide'); b.onclick=()=>handleKey(k); row.appendChild(b); });
+        kbEl.appendChild(row);
+      });
+    }
+
+    function updateBoard(){
+      for(let r=0;r<6;r++){
+        for(let c=0;c<5;c++){
+          const t=document.getElementById(`t-${r}-${c}`);
+          t.textContent=state.grid[r][c];
+          t.className='tile';
+          const s=state.statuses[r][c];
+          if(s) t.classList.add('revealed',s);
+        }
+      }
+    }
+
+    function updateMeta(){
+      metaEl.textContent = state.date.toLocaleDateString('da-DK',{day:'numeric',month:'long'});
+    }
+
+    function showToast(msg){ toastEl.textContent=msg; toastEl.classList.add('show'); setTimeout(()=>toastEl.classList.remove('show'), 1200); }
+
+    // === Evaluation ===
+    function evaluate(guess,target){
+      const res=Array(5).fill('absent');
+      const t=target.split('');
+      const g=guess.split('');
+      for(let i=0;i<5;i++){ if(g[i]===t[i]){ res[i]='correct'; t[i]=null; g[i]=null; } }
+      for(let i=0;i<5;i++){ if(g[i]){ const j=t.indexOf(g[i]); if(j!==-1){ res[i]='present'; t[j]=null; } } }
+      return res;
+    }
+
+    function handleEnter(){
+      const guess=state.grid[state.row].join('');
+      if(guess.length<5){ showToast('Ikke nok bogstaver'); return; }
+
+      // Vis hint-tilbud når der er 1 forsøg tilbage (skal til at gå til sidste række)
+      if(state.row===4 && !state.hintShown){
+        document.getElementById('hintPopup').style.display='block';
+        state.hintShown=true; // kun én gang pr. spil
+      }
+
+      const res=evaluate(guess,state.word);
+      state.statuses[state.row]=res; updateBoard();
+
+      if(guess===state.word){ endGame(true); return; }
+      state.row++; state.col=0; if(state.row>=6){ endGame(false); }
+    }
+
+    function endGame(win){
+      state.finished=true;
+      const title=document.getElementById('resultTitle');
+      const subtitle=document.getElementById('resultSubtitle');
+      const learnEl=document.getElementById('learn');
+      title.textContent = win? 'Godt gået! 🎉' : 'Øv! Prøv igen i morgen.';
+      subtitle.textContent = `Dagens ord var: ${state.word}`;
+      const L=learn[state.word];
+      learnEl.innerHTML = `
+        <h3>Hvad betyder det?</h3><p>${L.what}</p>
+        <h3>Hvorfor er det vigtigt?</h3><p>${L.why}</p>
+        <h3>Tip</h3><p>${L.tip}</p>
+        <h3>Fun fact</h3><p>${L.fact}</p>
+      `;
+      dlg.showModal();
+    }
+
+    function handleKey(k){
+      if(state.finished) return;
+      if(k==='ENTER') return handleEnter();
+      if(k==='\u232b' || k==='BACKSPACE'){ if(state.col>0){ state.col--; state.grid[state.row][state.col]=''; updateBoard(); } return; }
+      if(/^[A-ZÆØÅ]$/.test(k)){
+        if(state.col<5){ state.grid[state.row][state.col]=k; state.col++; updateBoard(); }
+      }
+    }
+
+    // Tastatur (fysisk)
+    window.addEventListener('keydown', (e)=>{
+      const key=e.key;
+      if(key==='Enter') return handleKey('ENTER');
+      if(key==='Backspace') return handleKey('\u232b');
+      const letter=key.toUpperCase();
+      if(/^[A-ZÆØÅ]$/.test(letter)) handleKey(letter);
+    });
+
+    // Hint-popup knapper
+    const hintPopup=document.getElementById('hintPopup');
+    document.getElementById('hintYes').onclick=()=>{ document.getElementById('hintText').textContent = learn[state.word].hint; };
+    document.getElementById('hintNo').onclick=()=>{ hintPopup.style.display='none'; };
+
+    // Modal knapper
+    againBtn.onclick=()=>{ dlg.close(); startFor(state.date); };
+    copyBtn.onclick=()=>{ const L=learn[state.word]; const text=`Dagens ord: ${state.word}\n\nHvad betyder det?\n${L.what}\n\nHvorfor er det vigtigt?\n${L.why}\n\nTip\n${L.tip}\n\nFun fact\n${L.fact}`; navigator.clipboard.writeText(text).then(()=>showToast('Kopieret!')); };
+
+    // === Kalender ===
+    const cal=document.getElementById('calendarPanel');
+    const calBtn=document.getElementById('calBtn');
+
+    function buildCalendar(){
+      cal.innerHTML='';
+      const title=document.createElement('div'); title.textContent='Oktober 2026'; title.style.cssText='text-align:center;font-weight:600;margin-bottom:6px'; cal.appendChild(title);
+
+      const hdr=document.createElement('div'); hdr.className='calendar-grid'; ['Ma','Ti','On','To','Fr','Lø','Sø'].forEach(d=>{ const el=document.createElement('div'); el.textContent=d; el.style.fontWeight='600'; hdr.appendChild(el); }); cal.appendChild(hdr);
+
+      const grid=document.createElement('div'); grid.className='calendar-grid';
+      const first=new Date(Date.UTC(OCT_YEAR,OCT_MONTH,1)); let start=first.getUTCDay(); if(start===0) start=7;
+      for(let i=1;i<start;i++) grid.appendChild(document.createElement('div'));
+
+      for(let d=1; d<=31; d++){
+        const date=new Date(Date.UTC(OCT_YEAR,OCT_MONTH,d)); if(date.getUTCMonth()!==OCT_MONTH) break;
+        const isWork = workdays.some(w=> w.getUTCDate()===d);
+        const cell=document.createElement('div'); cell.className='calendar-day'; cell.textContent=d;
+        if(!isWork){ cell.classList.add('inactive'); }
+        else { cell.onclick=()=>{ cal.style.display='none'; startFor(date); }; }
+        grid.appendChild(cell);
+      }
+      cal.appendChild(grid);
+    }
+
+    function highlightCalendar(date){
+      [...cal.querySelectorAll('.calendar-day')].forEach(el=>{
+        el.classList.remove('active');
+        if(parseInt(el.textContent,10)===date.getUTCDate()) el.classList.add('active');
+      });
+    }
+
+    calBtn.onclick=()=>{ cal.style.display = cal.style.display==='block' ? 'none' : 'block'; };
+    document.addEventListener('click', (e)=>{ if(!cal.contains(e.target) && e.target!==calBtn) cal.style.display='none'; });
+
+    buildCalendar();
+    startFor(workdays[0]);
+  })();
+  </script>
+</body>
+</html>
